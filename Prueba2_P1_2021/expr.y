@@ -58,8 +58,8 @@ stmt_list: stmt_list "\\n" stmt
     | stmt
     ;
 
-stmt: IDENT OPASSIGN expr { vars.emplace($1, $3); }
-    | KWPRINT expr   { sout << $2 << '\n'; }
+stmt: "identifier" "=" expr { vars.emplace($1, $3); }
+    | "print" expr   { sout << $2 << '\n'; }
     ;
 
 expr: expr "+" term {$$ = $1 + $3;}
