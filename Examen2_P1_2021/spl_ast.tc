@@ -1,0 +1,323 @@
+%option lang = "c++"
+%option namespace = "Ast" 
+
+
+%decls %{
+    #include <cstring>
+    #include <unordered_map>
+    #include <iostream>
+    #include <vector>
+    namespace Ast{ class ASTNode; }
+    using mult_expr = std::vector<Ast::ASTNode*>;
+    using SymbolVector = std::unordered_map<std::string, int>;
+    using string_t = std::string;
+
+%}
+
+%{
+#include "spl_ast.h" 
+#include <unordered_map>
+
+std::string dataSection = "" ;
+
+int temp_index = 0;
+std::string newTemp()
+{     
+    dataSection+= "tmp" + std::to_string(temp_index) + " " + "dd " + std::to_string(0) + "\n"  ;
+    return "dword [tmp" + std::to_string(temp_index++) + "]";
+}
+
+int label_index = 0;
+std::string newLabel(std::string label)
+{
+	return label + std::to_string(label_index++) + ":";
+}
+
+
+%}
+
+%node ASTNode %abstract %typedef = {
+    %nocreate string_t place;
+    %nocreate string_t code;  
+    %nocreate string_t source; 
+}
+
+%node BinaryExpr ASTNode %abstract  = {
+    ASTNode *expr1;
+    ASTNode *expr2;
+}
+
+%node AddExpr  BinaryExpr
+%node AndExpr  BinaryExpr
+%node OrExpr  BinaryExpr
+%node XorExpr  BinaryExpr
+%node LessThanExpr BinaryExpr
+
+%node Program ASTNode = {
+    mult_expr  expr_list;    
+}
+
+%node FuncStmt ASTNode = {
+    string_t id ;
+    mult_expr expr_list;
+    ASTNode *expr;
+}
+
+%node NumExpr ASTNode = {
+    int val ;
+}
+
+%node IdentExpr ASTNode = {
+    string_t id; 
+}
+
+%node AssignExpr ASTNode = {
+    string_t id; 
+    ASTNode * expr ;
+}
+
+%node BlockStmt ASTNode = {
+    mult_expr exprlist ;
+}
+
+%node PrintStmt ASTNode = {
+    ASTNode * expr_toprint;
+}
+
+%node CallExpr ASTNode = {
+     string_t id; 
+     mult_expr  expr1;
+}
+
+%node IfStmt ASTNode = {
+    ASTNode *cond ;
+    ASTNode *true_block;
+    ASTNode *false_block;
+}
+
+%node WhileStmt ASTNode = {
+    ASTNode * cond;
+    ASTNode * block;
+}
+
+%operation %virtual string_t genProgramCode(ASTNode *e, SymbolVector sym);
+
+genProgramCode(Program){
+    e->code += "extern printf\n";
+    e->code += "global main\n\n";
+    e->code += "section .data\n";
+    e->code += "format db '%d', 0\n";
+    std::string maincode = "";
+
+    for(const auto & i : e->expr_list){
+        i->genProgramCode(sym);
+        maincode += i->code;
+    }
+
+    for(int i = 0; i < temp_index; i++){
+        e->code += "temp" + std::to_string(i) + " dd 0\n";
+    }
+
+    e->code += "\nsection .text\n\n";
+    e->code += "main: \n";
+    e->code += maincode;
+    return e->code;
+}
+
+genProgramCode(FuncStmt)
+{
+    for(const auto& i:e->expr_list){
+        i->genProgramCode(sym);
+        e->code += i->code;
+    }
+    e->expr->genProgramCode(sym);
+    e->code += e->expr->code;
+    
+    return e->expr->code;
+}
+
+genProgramCode(NumExpr)
+{
+    e->place = newTemp();
+    e->code = "mov " + e->place + " , " + std::to_string(e->val);
+
+    return e->code;  
+}
+
+genProgramCode(IdentExpr)
+{
+    e->place = std::to_string(sym[e->id]);
+    return e->place;
+}
+
+genProgramCode(AddExpr)
+{
+    e->expr1->genProgramCode(sym);
+    e->expr2->genProgramCode(sym);
+
+    e->place = e->expr1->place;
+
+    e->code = e->expr1->code + "\n";
+    e->code += e->expr2->code + "\n";
+    e->code += "mov eax, " + e->expr2->place + "\n" ; 
+    e->code += "add " + e->expr1->place + ", " + "eax" + "\n" ;
+
+    return "";
+}
+
+genProgramCode(AndExpr)
+{
+    e->expr1->genProgramCode(sym);
+    e->expr2->genProgramCode(sym);
+
+    e->code+=e->expr1->code;
+    e->code+=e->expr2->code;
+
+    e->code+= "mov eax, "+e->expr1->place+"\n";
+    e->code+= "and eax, "+e->expr2->place+"\n";
+    e->place = newTemp();
+
+    e->code+= "mov "+e->place+", eax\n"; 
+   
+    return "";
+}
+
+genProgramCode(OrExpr)
+{
+    e->expr1->genProgramCode(sym);
+    e->expr2->genProgramCode(sym);
+
+    e->code+=e->expr1->code;
+    e->code+=e->expr2->code;
+
+    e->code+= "mov eax, "+e->expr1->place+"\n";
+    e->code+= "or eax, "+e->expr2->place+"\n";
+    e->place = newTemp();
+
+    e->code+= "mov "+e->place+", eax\n"; 
+
+    return "";
+}
+
+genProgramCode(XorExpr)
+{
+    e->expr1->genProgramCode(sym);
+    e->expr2->genProgramCode(sym);
+
+    e->code+=e->expr1->code;
+    e->code+=e->expr2->code;
+
+    e->code+= "mov eax, "+e->expr1->place+"\n";
+    e->code+= "xor eax, "+e->expr2->place+"\n";
+    e->place = newTemp();
+
+    e->code+= "mov "+e->place+", eax\n"; 
+    return "";
+}
+
+genProgramCode(LessThanExpr)
+{
+    e->expr1->genProgramCode(sym);
+    e->expr2->genProgramCode(sym);
+
+    e->place =  e->expr1->place;
+
+    e->code = e->expr1->code + "\n";
+    e->code += e->expr2->code + "\n" ;
+    e->code += "mov ecx, " + e->expr2->place + "\n";
+    e->code += "xor eax, eax\n" ; 
+    e->code += "cmp " + e->expr1->place + ", ecx \n" ;
+    e->code += "setl al\n" ;
+    e->code += "mov " + e->place + ", eax \n";   
+
+    return "";
+}
+
+genProgramCode(AssignExpr) 
+{
+    e->expr->genProgramCode(sym);
+
+    std::string tmp_expr = e->id;
+
+    if(sym.find(tmp_expr) == sym.end()) {
+        e->place = newTemp();
+        //sym.emplace(tmp_expr, e->place);
+        e->code = e->expr->code + "\n";
+        e->code += "mov eax," +  e->expr->place + "\n";
+        e->code += "mov "+ e->place + "," + "eax \n";
+    } else {
+        e->place =  std::to_string(sym[e->id]) ;
+        e->code = e->expr->code + "\n";
+        e->code += "mov eax ," + e->expr->place + "\n" ;
+        e->code += "mov "+ e->place + "," + "eax \n";
+    }
+
+    return "";    
+}
+
+genProgramCode(BlockStmt){
+
+    for(const auto& s: e->exprlist){ 
+        s->genProgramCode(sym);  
+        e->code +=  s->code;
+    }
+
+    return e->code;  
+}
+
+genProgramCode(PrintStmt){
+    e->expr_toprint->genProgramCode(sym);
+
+    e->code = e->expr_toprint->code + "\n" ;
+    e->code += "\n";
+    e->code += "push "+ e->place  + "\n";
+    e->code += "push fmt \n";
+    e->code += "call printf \n";
+    e->code += "add esp, " + std::to_string(8) + "\n" ; 
+
+    return e->code;
+}
+
+genProgramCode(CallExpr){
+  return "";
+}
+
+genProgramCode(IfStmt)
+{
+    std::string labelIf = newLabel("start_if");
+
+    e->cond->genProgramCode(sym);
+    e->true_block->genProgramCode(sym);
+    
+    if(e->false_block)
+       e->false_block->genProgramCode(sym);
+
+    e->code = e->cond->code + "\n";
+    e->code += "cmp " + e->cond->place + "," + std::to_string(1) + "\n";       
+    e->code += "jne "+ labelIf + "\n";
+    e->code += e->true_block->code + "\n";
+
+    e->code += labelIf + ":" +  "\n" ; 
+    e->code += e->false_block->code +"\n";
+
+    return "";
+}
+
+genProgramCode(WhileStmt)
+{
+    std::string start = newLabel("start_while");
+    std::string end = newLabel("end_while");
+    
+    e->cond->genProgramCode(sym);
+    e->block->genProgramCode(sym);
+
+    e->code = start + ": \n";
+    e->code = e->cond->code + "\n";
+    e->code += "cmp " + e->cond->place + ", " + std::to_string(0) + "\n";
+    e->code += "je " + end + "\n";
+    e->code += e->block->code + "\n" ;
+    e->code += "jmp " + start + "/n";
+    e->code += end + ":\n";
+
+    return "";
+}
